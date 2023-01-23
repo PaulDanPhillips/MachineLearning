@@ -1,0 +1,859 @@
+---
+title: "UCI Heart Disease: Group C Kaggle Group Project"
+author: "Alexander Toledo, Paul Phillips, Pete Chuckran, Tanner Porter"
+date: "11/26/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(splines)
+library(ggpubr)
+library(gam)
+library(knitr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(emmeans)
+library(Lock5Data)
+library(RColorBrewer)
+library(corrplot)
+library(prodlim)
+library(glmnet)
+library(tidyverse)
+library(kknn)
+library(caret)
+library(tidyr)
+library(glmnet)
+library(kableExtra)
+library(data.table)
+```
+
+```{r, echo = FALSE}
+#setwd('C:/Users/pauld/Desktop/StatisticalComputing/Project')
+setwd("~/Desktop/Coursework/Statistical_computing/UCI/")
+#Heart = read.csv('heart.csv',header=TRUE, sep=',')
+#Heart <- read.csv("~/Dropbox/School/Fall 2019/STA 578/STA 578 Project/heart.csv")
+cols <- c("sex", "cp", "fbs", "restecg", "exang", 
+          "slope", "ca", "thal", "target")
+Heart[cols] <- lapply(Heart[cols], factor)
+#setnames(Heart, 'ï..age', 'age')
+#Heart$age<-Heart$ï..age
+```
+
+## Background
+
+Our proposed dataset observes the influence of 13 predictors on the presence of heart disease in 303 patients. This data was originally released by University of California Irvine (UCI) [1], and accessed through Kaggle [2] on November 14, 2019. Patient data was collected at the Cleveland Clinic between May of 1981 and September of 1984 [3], and has been used repeatedly as sample data in both machine learning and medical studies (e.g. [4, 5]). We intend to implement a number of statistical models in order to predict the occurrence of heart disease in a given patient. Further, we hope to identify which variables most strongly influence our prediction. Understanding the factors which contribute to heart disease represents a fundamental challenge with this dataset. This is to say that we seek a solution which is both interpretable and predictive 
+
+
+## Variables
+
+### Response:
+
+`target`; Factor; 0/1; where 0 represents the presence of heart disease in patient.
+
+The original UCI dataset contained a response which ranged from 0-4, with 0 being no presence of heart disease [1,2]. Although the description of the data provided on Kaggle never explicitly states the meaning of the factors, the discussion board associated with the dataset clarifies that 1 indicates no presence of heart disease. This can also be inferred from some our distributions such as 'age', where we see a higher prevalence of heart disease (target == 0, Fig 1a) in older patients.
+
+### Predictors:
+
+`age`; Numeric: 25-80; Age of patient in years. The average age of patients with heart disease was 56.6 (Fig 1A; Table 2) versus 52.5 for those without, suggesting that heart disease occurs in older patients.
+
+`sex`; Factor; 0/1; where 1 is male and 0 is female (Table 1). Heart disease tends to be more prevalent in men than women (Fig 1B). Heart disease was found in 55% of male patients, versus 25% for female patients.
+
+`cp`; Factor; 0/1/2/3; chest pain type experienced by patient, where 0 is typical angina, 1 is atypical angina, 2 is non-anginal pain, 3 is asymptomatic. A majority of patients in the study (47%) were experiencing typical angina (Table 1). Of those patients, 72% had heart disease. Patients with other forms of chest pain had much lower rates of heart disease (18% and 21% for atypical and non-anginal pain, respectively). Patients experiencing no chest pain had a 30% chance of heart disease. 
+
+`trestbps`; Numeric; 94-200; resting blood pressure in mmHg. Patients with heart disease had slightly higher resting blood pressure (134.4, Table 2, Fig 1D) 
+
+`chol`; Numeric; 126-564; cholesterol in mg/dl. Patients with heart disease tended to have higher cholesterol (251.1 mg/dl) than those without (242.23 mg/dl). However, the distribution of cholesterol between the two groups are not significantly different (P > 0.1, Fig 1E), and might not serve as a useful predictor in our models.
+
+```{r, include=FALSE}
+summary(lm(chol~target, Heart))
+```
+
+`fbs`; Factor; 0/1; fasting blood sugar, 1 if over 120 mg/dl, 0 if less than 120 mg/dl. Patients with high fasting blood sugar had a slightly higher (49%) chance of having heart disease than those with low fasting blood sugar (45%; Table 1). It is unlikely this variable will have much predicting power, especially considering the highly uneven distribution within sampling, where 85% of all patients are in the low blood-sugar group.
+
+`restecg`; Factor; 0/1/2; resting ECG, 0 if left ventricular hypertrophy, 1 if normal, 2 if ST-T wave abnormality. Patients with normal ST-waves in their electrocardiograms have a lower rate of heart disease than those with left ventricular hypertrophy or abnormal ST-waves (36% versus 53% and 75%, respectively; Fig 1G; Table1). There are only 4 observations for ST-wave abnormality, so we may end up grouping factor 0 and 2, giving us 2 factors: normal and non-normal electrocardiograms.   
+
+`thalach`; Numeric; 71-202; maximum heart rate in bpm. Maximum heart rate is higher in patients without heart disease (158 bpm; Table 2, Fig 1H) than patients with heart disease (139 bpm). 
+
+`exang`; Factor; 0/1; Exercise induced angina, 1 if yes, 0 if no. Predictably, presence of heart disease was much higher in patients with exercise induced angina (76%) than those without (30%; Table 1).
+
+`oldpeak`; Numeric; 0-6.5; Depression of ST induced by exercise (% depression relative to ST at rest). Although a majority of patients in both groups did not have a depression of ST (oldpeak = 0; combined 32%; Fig 1J), the mean depression was  higher (1.59, Table 2) in patients with heart disease than those without (0.58). 
+
+```{r, include = FALSE}
+summary(lm(oldpeak~target, Heart))
+```
+
+`slope`; Factor; 0/1/2; The slope of the ST segment during exercise where 0 is up-sloping, 1 is flat, 2 is down-sloping. A majority of patients had a ST segment that was either flat (46%) or down-sloping (47%; Table 1). Of those, heart disease was less prevalent in patients with a down-sloping ST segment, where 25% of those patients had heart disease versus 65% of those with a flat ST segment. 57% of patients with an up-sloping ST segments had heart disease, however there were only 21 patients in this group. Since the proportion of patients with heart disease in this group is similar to that of the group with flat ST segments, we might consider grouping this factor into 2 factors: down-sloping and not-downsloping.
+
+`ca`; Factor; 0/1/2/3/4; Number of major vessels colored by fluoroscopy from 0-3, 4 represents missing values. The majority (175/303; 57%; Table 1) of all patients had no major vessels colored by flouroscopy. Heart disease was present in only 25% of those patients. Heart disease was increasingly present in patients with more major vessels colored by flouroscopy (68%, 82%, and 85% for 1, 2, and 3 respectively; Fig 1L). Since these groups are considerably smaller than the non labeled group, we may group this factor into labeled vs non-labeled. Data for 5 patients were missing, and will be removed from the analysis.
+
+`thal`; Factor; 0/1/2/3; Occurrence of thalassemia, 2=1 is a fixed defect, where 2 is normal, 3 is a reversible defect, and 0 is missing. Patients with thalassemia were more likely to have heart disease (75%) than those without (21%). Heart disease was more prelevant if the thalassemia was a reversible defect (76%) versus a fixed defect (66%; Table 1). However, since only 6% of all patients had a fixed defect, we may combine these groups into those with and without thalassemia. Data for two patients were missing, and will be removed from the analysis.
+
+\newpage
+
+### Table 1:
+
+*Presented is the factored variables that are part of the Heart Disease dataset. Units represent percentage of patients corresponding to specific factor-values. Results are seperated by patients with (A) and without (B) heart disease. *
+
+#### A
+```{r, echo=FALSE}
+numCol <- select_if(Heart, is.numeric) %>% colnames()
+factCol <- select_if(Heart, is.factor) %>% colnames() %>% .[-9]
+
+factTbl1 <- matrix(ncol = 8, nrow = 5)
+factTbl0 <- matrix(ncol = 8, nrow = 5)
+Heart1 <- Heart %>% filter(target ==1)
+Heart0 <- Heart %>% filter(target ==0)
+
+i = 1
+for(col in Heart1[factCol]){
+  factTbl1[1, i] <- 100*sum(col==0)/303
+  factTbl1[2, i] <- 100*sum(col==1)/303
+  factTbl1[3, i] <- 100*sum(col==2)/303
+  factTbl1[4, i] <- 100*sum(col==3)/303
+  factTbl1[5, i] <- 100*sum(col==3)/303
+  i = i+1
+}
+i = 1
+for(col in Heart0[factCol]){
+  factTbl0[1, i] <- 100*sum(col==0)/303
+  factTbl0[2, i] <- 100*sum(col==1)/303
+  factTbl0[3, i] <- 100*sum(col==2)/303
+  factTbl0[4, i] <- 100*sum(col==3)/303
+  factTbl0[5, i] <- 100*sum(col==3)/303
+  i = i+1
+}
+factTbl1 <- round(factTbl1, digits = 1)
+factTbl1[factTbl1 == 0] <- ""
+factTbl1 <- as.data.frame(factTbl1)
+colnames(factTbl1) <- factCol
+factTbl1 <- cbind(data.frame(Value=c(0, 1, 2, 3, 4)), factTbl1)
+kable(factTbl1, digits = 3)
+```
+#### B
+
+```{r, echo=FALSE}
+factTbl0 <- round(factTbl0, digits = 1)
+factTbl0[factTbl0 == 0] <- ""
+factTbl0 <- as.data.frame(factTbl0)
+colnames(factTbl0) <- factCol
+factTbl0 <- cbind(data.frame(Value=c(0, 1, 2, 3, 4)), factTbl0)
+kable(factTbl0, digits = 3)
+```
+
+
+\newpage
+### Table 2:
+
+```{r, echo=FALSE}
+numCol <- select_if(Heart, is.numeric) %>% colnames()
+factCol <- select_if(Heart, is.factor) %>% colnames()
+numTbl <- matrix(ncol = 5, nrow = 5)
+Heart1 <- Heart %>% filter(target ==1)
+Heart0 <- Heart %>% filter(target ==0)
+
+i = 1
+for(col in Heart1[numCol]){
+  numTbl[i, 1] <- numCol[i]
+  numTbl[i, 2] <- round(mean(col), digits = 2)
+  numTbl[i, 3] <- round(sd(col), digits = 2)
+  i = i+1
+}
+
+i = 1
+for(col in Heart0[numCol]){
+  numTbl[i, 4] <- round(mean(col), digits = 2)
+  numTbl[i, 5] <- round(sd(col), digits = 2)
+  i = i+1
+}
+numTbl <- as.data.frame(numTbl)
+colnames(numTbl) <- c("variable", "Absent_Mean", "Absent_SD", "Present_Mean", "Present_SD")
+kable(numTbl)
+```
+
+*The mean  standard deviation values of each numeric predictor varialble that is either associated with Heart Disease (Present_mean, Present_SD) or associated with no Heart Disease (Absent_mean, Absent_SD). While some of the Absent_Mean and Present_Mean seem quite different, it should be noted that all are within 1 standard deviation of another.*
+
+
+\newpage
+```{r, echo = FALSE, warning=FALSE}
+age_hist <- ggplot(Heart, aes(x = age, fill = target, color = target))+
+  geom_histogram(position="identity", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  theme_classic()
+
+sex_barchart <- ggplot(Heart, aes(sex, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), color="black")+
+  scale_fill_brewer(palette = "Dark2")+
+  theme_classic()
+
+
+cp_bar <- ggplot(Heart, aes(x = cp, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), color="black")+
+  theme_classic()
+
+trestbps_hist <- ggplot(Heart, aes(x = trestbps, fill = target, color = target))+
+  geom_histogram(position="identity", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  theme_classic()
+
+chol_hist <- ggplot(Heart, aes(x = chol, fill = target, color = target))+
+  geom_histogram(position="identity", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  theme_classic()
+
+fbs_bar <- ggplot(Heart, aes(x = fbs, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), color="black")+
+  theme_classic()
+
+restecg_bar <- ggplot(Heart, aes(x = restecg, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), 
+            color="black", check_overlap = TRUE)+
+  theme_classic()
+
+
+thalach_hist <- ggplot(Heart, aes(x = thalach, fill = target, color = target))+
+  geom_histogram(position="identity", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  theme_classic()
+
+
+exang_bar <- ggplot(Heart, aes(x = exang, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), 
+            color="black", check_overlap = TRUE)+
+  theme_classic()
+
+oldpeak_hist <- ggplot(Heart, aes(x = oldpeak, fill = target, color = target))+
+  geom_histogram(position="identity", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  scale_color_brewer(palette = "Dark2")+
+  theme_classic()
+
+slope_bar <- ggplot(Heart, aes(x = slope, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5), 
+            color="black", check_overlap = TRUE)+
+  theme_classic()
+
+ca_bar <- ggplot(Heart, aes(x = ca, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = .5), 
+            color="black", check_overlap = TRUE)+
+  theme_classic()
+
+thal_bar <- ggplot(Heart, aes(x = thal, fill = target))+
+  geom_bar( color = "black", alpha = 0.5)+
+  scale_fill_brewer(palette = "Dark2")+
+  geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = .5), 
+            color="black", check_overlap = TRUE)+
+  theme_classic()
+```
+
+\newpage
+
+```{r, fig.height = 10.5, fig.width = 8, echo=FALSE, warning=FALSE, message=FALSE}
+predictor_graphs <- ggarrange(age_hist, sex_barchart, cp_bar, trestbps_hist, chol_hist,
+                  fbs_bar, restecg_bar, thalach_hist, exang_bar, oldpeak_hist,
+                  slope_bar, ca_bar, thal_bar,
+                  ncol =3, nrow =5, common.legend = TRUE, legend = "top",
+                  labels = c("A","B","C","D","E","F","G","H","I","J","K","L","M"))
+annotate_figure(predictor_graphs, fig.lab = "Figure 1", fig.lab.size = 12)
+```
+
+*The count and distribution of each of the 13 predictor variables and their association with Heart Disease.*
+
+## Modeling Strategies
+
+`One`; We are planning to build the most interpretable model by using some of our regularization techniques (lasso, elastic-net, and ridge). This could be beneficial to any researcher ultimately looking for which variable they should be looking to target for R&D drug development.
+
+`Two`; We are also planning to build the most predictive models using trees and more non-linear approaches (Random Forests and KNN). This could be beneficial to any care-giver wanting to be able to most accurately predict which patients are in severe danger of developing heart diseases, so that some preventative measures may be made.
+
+`Logistic Regression`; As our response variable consists of yes and no (0,1), modeling with logistic regression is a natural first step. 
+
+`Regularization`;The ridge algorithm utilizes an l2 penalty to each predictor. This in turn causes important predictors to stand out, while less important predictors will have much less effect(always some effect unlike lasso). The lasso algorithm works similarly to ridge but encorporates an l1 penalty that allows predictors to shrink to 0, where they are no longer incorporated in the model. Elastic net works similarly to both ridge and lasso, as it utilizes both the l2 penalty to deal with multicollinearity between predictor variables, while also using the l1 penalty to allow for the most parsimonious model to be discovered.
+
+`KNN`;K nearest neighbors is an algorithm that predicts the response variables based on a point's "nearest neighbors," K. One of the important considerations in utilizing a KNN model is the appropriate tuning of K, the neighborhood size. In the heart disease dataset, we expect KNN to perform fairly well (similiar to other methods) and produce fairly interpretable results, as the algorithm is only considering (averaging or weighting) what is around an unknown point. 
+
+`Random Forests`; Random Forest: A single tree can result in strong interpretation, but might lack in prediction. Pruning the tree can help with predictive performance. Also, pruning will allow one to determine the important decisions for the prediction. Trees can work well in situations such as a classification problem where one wants to determine if a patient has "x" disease based on their results from the tests performed. Based on the data set we are using a pruned tree could lead to possible investigation on the important predictors. Also, this would allow a doctor to determine if the patient has heart disease based on the decisions made on the tree.
+  The problem with a single tree is that its predictive power is not as strong as other potential methods. A solution to this is to run multiple trees. Thus, creating a random forest. A random forest has the opposite effect of a single tree, where it has better predictive power, but lower interpretability. This method could also work for our data set in the sense that we could predict if a patient has heart disease.
+
+
+
+## Citations
+
+[1] Janosi A, Steinbrunn W, Pfisterer M, Detrano R. UCI repository of machine learning databases. 1988. https://archive.ics.uci.edu/ml/datasets/Heart+Disease
+
+[2] Heart Disease UCI. 2018. https://www.kaggle.com/ronitf/heart-disease-uci
+
+[3] Detrano R, Janosi A, Steinbrunn W, Pfisterer M, Schmid JJ, Sandhu S, Guppy K, Lee S, Froelicher V. International application of a new probability algorithm for the diagnosis of coronary artery disease. 1989. The American Journal of Cardiology. 64, 304-310. 
+
+[4] Nahar J, Imam T, Tickle KS, Chen YPP. Computational intelligence for heart disease diagnosis: A medical knowledge driven approach. Expert Syst Appl 2013; 40: 96–104. 
+
+[5] Das R, Turkoglu I, Sengur A. Effective diagnosis of heart disease through neural networks ensembles. Expert Syst Appl 2009; 36: 7675–7680. 
+
+\newpage
+
+## Preliminary Findings
+
+**Data Manipulation**
+```{r}
+# Heart = read.csv("~/Dropbox/School/Fall 2019/STA 578/STA 578 Project/heart.csv")
+setwd("~/Desktop/Coursework/Statistical_computing/UCI/")
+#setwd('C:/Users/pauld/Desktop/StatisticalComputing/Project')
+Heart = read.csv('heart.csv',header=TRUE, sep=',')
+
+#Heart <- read.csv("~/Dropbox/School/Fall 2019/STA 578/STA 578 Project/heart.csv")
+str(Heart)
+
+Heart = filter(Heart, !thal == 0 & !ca == 4)
+
+Heart<-subset(Heart,thal!=0)
+Heart<-subset(Heart,ca!=4)
+Heart$restecg[Heart$restecg==2] <- 0
+Heart$ca[Heart$ca==2] <- 1
+Heart$ca[Heart$ca==3] <- 1
+Heart$thal[Heart$thal==3] <- 1
+Heart$slope[Heart$slope==0] <- 1
+Heart$cp[Heart$cp==3] <- 1
+Heart$cp[Heart$cp==2] <- 1
+
+cols <- c("sex", "cp", "fbs", "restecg", "exang", 
+          "slope", "ca", "thal", "target")
+Heart[cols] <- lapply(Heart[cols], factor)
+
+str(Heart)
+
+
+# Heart<-Heart %>% select(target, everything())
+# as.formula(Heart)
+```
+
+**Bootstrap glm to find common model**
+
+```{r}
+# boot.glm <- function(data,  iter){
+#   
+#   Coef.Table <- NULL
+#   
+#   for (j in 1:iter) {
+#   
+#   
+#   index <- sample(1:nrow(data), nrow(data), replace=TRUE)
+#   
+#   Boot.temp <- data %>% slice(index)
+#   
+#   step.test <- step(glm(target ~., data=Boot.temp, family="binomial"), k = log(dim(data)[1]), trace=FALSE)
+#   
+#   ifelse(is.null(Coef.Table),
+#        Coef.Table <- t(as.data.frame(step.test$coefficients)),
+#        Coef.Table <- merge(Coef.Table, t(as.data.frame(step.test$coefficients)), all=TRUE))
+# 
+#   }
+#   Boot_Coef <<- Coef.Table
+#   
+#   Perc.Incl<-as.data.frame(t((iter - apply(apply(Coef.Table, 2, is.na),2,sum))/iter))
+#   
+#   return(Perc.Incl)
+# }
+# 
+# Paul = boot.glm(Heart, iter = 1000)
+# 
+# kableExtra::kable(Paul)
+```
+
+
+**Functions for analysis**
+```{r}
+#####################################
+######    KNN     ###################
+#####################################
+
+KNN <- function(test, train, k_vector, formula){
+  Out <- NULL
+    for (k in k_vector) {
+      KNN <- kknn(formula, train=train, test = test, k = k, kernel = 'rectangular')  
+      Acc <- mean(KNN$fitted.values == test$target)
+      Name <- paste("KNN_", k, sep = "")
+      Out <- as.data.frame(cbind(Out, cbind(Acc)))
+    }
+  Names <- paste("KNN_", k_vector, sep = "")
+  names(Out) <- Names
+  Out <- as.vector(Out)
+  return(Out)
+}
+  
+#####################################
+######    Random Forest     #########
+#####################################
+randomForest.method.2 <- function(train, test){
+  RF.2   <- randomForest::randomForest( target ~ ., data=train, 
+                                        mtry=sqrt((ncol(train)-1)),
+                                        importance=TRUE,
+                                        ntree = 1000)
+  
+  yhat <- predict(RF.2, newdata=test, type='class')
+  
+  Acc <- mean(test$target == yhat)
+  
+  Out <- cbind("RF_sqrt" = Acc)
+  
+  return(Out)
+}
+
+#####################################
+######    Pruned tree       #########
+#####################################
+
+Pruned.method <- function(train, test)
+{
+  my.tree.3 <- rpart::rpart(target ~ ., data=train)
+  pruned.tree.2 <- rpart::prune( my.tree.3, cp=3, method='misclas' )
+  yhat <- predict(pruned.tree.2, newdata=test, type='class')
+  Acc <- mean(yhat == test$target)
+  Acc <- cbind(Pruned_Tree = Acc)
+  return(Acc)
+}
+
+
+#####################################
+######   Lamda Tuning       #########
+#####################################
+
+RegularizationTuning <- function(TOTAL){
+    boot.its <- 100
+    lambda.seq <- exp(seq(0, 10, length.out=1000))
+    alpha.seq <- seq(0.01, 0.99, length.out = 1000)
+    lambda.matrix <- matrix(ncol=6, nrow=boot.its)
+    ENET.alpha <- matrix(ncol=2, nrow=boot.its)
+    #TotalNeed a train + test dataframe
+    # TOTAL<-full_join(train, test)
+    for(j in 1:boot.its){
+        if( j%%10==0 ) cat('Iteration ', j, '\n')
+        TOTAL.index <- sample(1:nrow(TOTAL), nrow(TOTAL), replace=TRUE) ### Boostraps
+    
+        Boot.TOTAL <- TOTAL %>% slice(TOTAL.index)
+        x.temp <- model.matrix(target~., data=Boot.TOTAL)[,-1]
+        y.temp <- Boot.TOTAL$target
+        boot.cv.ridge <- cv.glmnet(x=x.temp, y=y.temp, family='binomial', alpha=0, lambda=lambda.seq)
+    
+        lambda.matrix[j,1] <- boot.cv.ridge$lambda.min
+        lambda.matrix[j,2] <- boot.cv.ridge$lambda.1se
+    
+        boot.cv.lasso <- cv.glmnet(x=x.temp, y=y.temp, family='binomial', alpha=1, lambda=lambda.seq)
+        lambda.matrix[j,3] <- boot.cv.lasso$lambda.min
+        lambda.matrix[j,4] <- boot.cv.lasso$lambda.1se
+        
+        boot.cv.enet <- cv.glmnet(x=x.temp, y=y.temp, family='binomial', alpha=0.5, lambda=lambda.seq) 
+        lambda.matrix[j,5] <- boot.cv.enet$lambda.min
+        lambda.matrix[j,6] <- boot.cv.enet$lambda.1se
+    
+    }
+    
+    lambda.df <- data.frame(lambda.matrix) %>% mutate(Iterations = 1:n())
+    colnames(lambda.df)[1:6] <- paste0(rep(c('RIDGE', 'LASSO','ENET'), each=2),
+    rep(c('.min', '.1se'), 2))
+    
+    lambda.df.long <- lambda.df %>% gather(Model, Lambda, 1:6)
+    
+    lambda.summary <- lambda.df.long %>% group_by(Model) %>%
+    summarise(Mean = exp(mean(log(Lambda))), Median = exp(median(log(Lambda))))
+    return(lambda.summary)
+}
+    
+LDA_Heart <- function(train, test, formula){
+    Heart.lda <- MASS::lda(formula,data=train)
+    predictions.lda <- predict(Heart.lda, test)
+    class <- predictions.lda$class
+    full_lda <- mean(class==test$target)
+    return(full_lda)
+}
+
+#QDA_Heart <- function(train, test, formula){
+#  Heart.qda <- MASS::qda(formula,data=train)
+#  predictions.qda <- predict(Heart.qda, test)
+#  class <- predictions.qda$class
+#  full_qda <- mean(class==test$target)
+#  return(full_qda)
+#}
+
+#####################################
+######    Regularization    #########
+#####################################
+
+ENETfunc<-function(train,test){
+    x.temp <- model.matrix(target~., data=train)[,-1]
+    y.temp <- train$target
+    ENET.1se.accuracy <- numeric()
+    ENET.min.accuracy <- numeric()
+    ENET.1se.matrix= data.frame(matrix(data = NA))
+    ENET.min.matrix= data.frame(matrix(data = NA))
+    #Enet with lamda.1se then lamda.min
+    ENET.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=0.1)
+    ENET.preds.1se <- predict(ENET.full, newx = model.matrix(target~., data=test)[,-1],
+        s=lambda.summary$Median[which(lambda.summary$Model == "ENET.1se")],
+        type='response')
+    ENET.preds.1se <- ifelse(ENET.preds.1se>0.5, 1, 0)
+    ENET.1se.accuracy <-mean(ENET.preds.1se==test$target)
+
+    ENET.preds.min <-predict(ENET.full, newx = model.matrix(target~., data=test)[,-1],
+        s=lambda.summary$Median[which(lambda.summary$Model == "ENET.min")],
+        type='response')
+    ENET.preds.min <- ifelse(ENET.preds.min>0.5, 1, 0)
+    ENET.min.accuracy <-mean(ENET.preds.min==test$target)
+
+
+    #rbind each models accuracies to their respective vectors
+    ENET.1se.matrix= rbind(ENET.1se.accuracy)
+    ENET.min.matrix= rbind(ENET.min.accuracy)
+    ENET=cbind.data.frame(ENET.1se.matrix, ENET.min.matrix)
+    return(ENET)
+}
+
+#ENETfunc(train, test)
+
+
+#Lasso with lamda.1se then lamda.min
+LASSOfunc <- function(train, test){
+    x.temp <- model.matrix(target~., data=train)[,-1]
+    y.temp <- train$target
+    LASSO.1se.accuracy <- numeric()
+    LASSO.min.accuracy <- numeric()
+    LASSO.1se.matrix= data.frame(matrix(data = NA))
+    LASSO.min.matrix= data.frame(matrix(data = NA))
+    LASSO.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=1)
+    LASSO.preds.1se <- predict(LASSO.full, newx = model.matrix(target~., data=test)[,-1],
+        s=lambda.summary$Median[which(lambda.summary$Model == "LASSO.1se")],
+        type='response')
+    LASSO.preds.1se <- ifelse(LASSO.preds.1se>0.5, 1, 0)
+    LASSO.1se.accuracy <-mean(LASSO.preds.1se==test$target)
+
+    LASSO.preds.min <-predict(LASSO.full, newx = model.matrix(target~., data=test)[,-1],
+        s=lambda.summary$Median[which(lambda.summary$Model == "LASSO.min")],
+        type='response')
+    LASSO.preds.min <- ifelse(LASSO.preds.min>0.5, 1, 0)
+    LASSO.min.accuracy <-mean(LASSO.preds.min==test$target)
+
+    LASSO.1se.matrix= rbind(LASSO.1se.accuracy)
+    LASSO.min.matrix= rbind(LASSO.min.accuracy)
+    LASSO=cbind.data.frame(LASSO.1se.matrix, LASSO.min.matrix)
+    return(LASSO)
+}
+#LASSOfunc(train,test)
+
+RIDGEfunc <- function(train, test){
+    x.temp <- model.matrix(target~., data=train)[,-1]
+    y.temp <- train$target
+    RIDGE.1se.accuracy <- numeric()
+    RIDGE.min.accuracy <- numeric()
+    RIDGE.1se.matrix= data.frame(matrix(data = NA))
+    RIDGE.min.matrix= data.frame(matrix(data = NA))
+    RIDGE.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=0)
+    RIDGE.preds.1se <- predict(RIDGE.full, newx = model.matrix(target~., data=test)[,-1],
+                               s=lambda.summary$Median[which(lambda.summary$Model == "RIDGE.1se")],
+                               type='response')
+    RIDGE.preds.1se <- ifelse(RIDGE.preds.1se>0.5, 1, 0)
+    RIDGE.1se.accuracy <-mean(RIDGE.preds.1se==test$target)
+
+    RIDGE.preds.min <-predict(RIDGE.full, newx = model.matrix(target~., data=test)[,-1],
+                              s=lambda.summary$Median[which(lambda.summary$Model == "RIDGE.min")],
+                              type='response')
+    RIDGE.preds.min <- ifelse(RIDGE.preds.min>0.5, 1, 0)
+    RIDGE.min.accuracy <-mean(RIDGE.preds.min==test$target)
+
+    RIDGE.1se.matrix= rbind(RIDGE.1se.accuracy)
+    RIDGE.min.matrix= rbind(RIDGE.min.accuracy)
+    RIDGE=cbind.data.frame(RIDGE.1se.matrix, RIDGE.min.matrix)
+    return(RIDGE)
+}
+#RIDGEfunc(train,test)
+
+LogRigress_Step <- function(train, test){
+  
+    LR.step.accuracy<-numeric()
+    LR.matrix= data.frame(matrix(data = NA))
+    LR.step <- glm(target ~ ca+ cp+ sex+ slope+ thal+ thalach+ exang+ trestbps, family='binomial',data=train)
+    LR.step.predictions <- predict(LR.step, test, type='response')
+    LR.step.predictions <- ifelse(LR.step.predictions>0.5, 1, 0)
+    LR.step.accuracy <-mean(LR.step.predictions==test$target)
+    Out = cbind(GLM_step = LR.step.accuracy)
+    return(Out)
+}
+
+LogRigress_Full <- function(train, test){
+  
+    LR.full.accuracy<-numeric()
+    LR.matrix= data.frame(matrix(data = NA))
+    LR.full <- glm(target ~ ., family='binomial', data = train)
+    LR.full.predictions <- predict(LR.full, test, type='response')
+    LR.full.predictions <- ifelse(LR.full.predictions>0.5, 1, 0)
+    LR.full.accuracy <-mean(LR.full.predictions==test$target)
+    Out = cbind(GLM_Full = LR.full.accuracy)
+    return(Out)
+}
+
+LASSOfunc_cv_l <- function(train, test){
+  x.temp <- model.matrix(target~., data=train)[,-1]
+  y.temp <- train$target
+  LASSO.1se.accuracy <- numeric()
+  LASSO.min.accuracy <- numeric()
+  LASSO.1se.cv= data.frame(matrix(data = NA))
+  LASSO.min.cv= data.frame(matrix(data = NA))
+  LASSO.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=1)
+  LASSO.preds.1se <- predict(LASSO.full, newx = model.matrix(target~., data=test)[,-1],
+                             s = LASSO.full$lambda.1se,
+                             type='response')
+  LASSO.preds.1se <- ifelse(LASSO.preds.1se>0.5, 1, 0)
+  LASSO.1se.accuracy <-mean(LASSO.preds.1se==test$target)
+  
+  LASSO.preds.min <-predict(LASSO.full, newx = model.matrix(target~., data=test)[,-1],
+                            s=LASSO.full$lambda.min,
+                            type='response')
+  LASSO.preds.min <- ifelse(LASSO.preds.min>0.5, 1, 0)
+  LASSO.min.accuracy <-mean(LASSO.preds.min==test$target)
+  
+  LASSO.1se.cv= rbind(LASSO.1se.accuracy)
+  LASSO.min.cv= rbind(LASSO.min.accuracy)
+  LASSO=cbind.data.frame(LASSO.1se.cv, LASSO.min.cv)
+  return(LASSO)
+}
+
+ENETfunc_cv_l <-function(train,test){
+  x.temp <- model.matrix(target~., data=train)[,-1]
+  y.temp <- train$target
+  ENET.1se.accuracy <- numeric()
+  ENET.min.accuracy <- numeric()
+  ENET.1se.cv= data.frame(matrix(data = NA))
+  ENET.min.cv= data.frame(matrix(data = NA))
+  #Enet with lamda.1se then lamda.min
+  ENET.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=0.1)
+  ENET.preds.1se <- predict(ENET.full, newx = model.matrix(target~., data=test)[,-1],
+                            s=ENET.full$lambda.1se,
+                            type='response')
+  ENET.preds.1se <- ifelse(ENET.preds.1se>0.5, 1, 0)
+  ENET.1se.accuracy <-mean(ENET.preds.1se==test$target)
+  
+  ENET.preds.min <-predict(ENET.full, newx = model.matrix(target~., data=test)[,-1],
+                           s=ENET.full$lambda.min,
+                           type='response')
+  ENET.preds.min <- ifelse(ENET.preds.min>0.5, 1, 0)
+  ENET.min.accuracy <-mean(ENET.preds.min==test$target)
+  
+  
+  #rbind each models accuracies to their respective vectors
+  ENET.1se.cv = rbind(ENET.1se.accuracy)
+  ENET.min.cv = rbind(ENET.min.accuracy)
+  ENET=cbind.data.frame(ENET.1se.cv, ENET.min.cv)
+  return(ENET)
+}
+
+RIDGEfunc_cv_l <-function(train,test){
+  x.temp <- model.matrix(target~., data=train)[,-1]
+  y.temp <- train$target
+  RIDGE.1se.accuracy <- numeric()
+  RIDGE.min.accuracy <- numeric()
+  RIDGE.1se.cv= data.frame(matrix(data = NA))
+  RIDGE.min.cv= data.frame(matrix(data = NA))
+  #RIDGE with lamda.1se then lamda.min
+  RIDGE.full <- cv.glmnet(x=x.temp,y=y.temp, family='binomial', alpha=0.1)
+  RIDGE.preds.1se <- predict(RIDGE.full, newx = model.matrix(target~., data=test)[,-1],
+                             s=RIDGE.full$lambda.1se,
+                             type='response')
+  RIDGE.preds.1se <- ifelse(RIDGE.preds.1se>0.5, 1, 0)
+  RIDGE.1se.accuracy <-mean(RIDGE.preds.1se==test$target)
+  
+  RIDGE.preds.min <-predict(RIDGE.full, newx = model.matrix(target~., data=test)[,-1],
+                            s=RIDGE.full$lambda.min,
+                            type='response')
+  RIDGE.preds.min <- ifelse(RIDGE.preds.min>0.5, 1, 0)
+  RIDGE.min.accuracy <-mean(RIDGE.preds.min==test$target)
+  
+  
+  #rbind each models accuracies to their respective vectors
+  RIDGE.1se.cv = rbind(RIDGE.1se.accuracy)
+  RIDGE.min.cv = rbind(RIDGE.min.accuracy)
+  RIDGE=cbind.data.frame(RIDGE.1se.cv, RIDGE.min.cv)
+  return(RIDGE)
+}
+
+formula2 <- target ~ .
+```
+
+
+Kfold function
+```{r}
+
+lambda.summary<-RegularizationTuning(Heart)
+
+KFold_CV_Heart <- function(Data, iter, ...){
+  # library(foreach)
+  # 
+  # Data = Heart
+  # iter = 5
+  # formula =formula("target ~ cp + ca + sex + slope + thal")
+  # 
+doParallel::registerDoParallel(parallel::detectCores()) #register number of cores available
+ 
+  
+  Fold = NULL
+  
+  #for(z in 1:iter){
+x = foreach (z = 1:iter, .combine = rbind) %dopar% {
+  
+    Folds.Temp <- caret::createFolds(Heart$target, 10)
+    
+      for (i in 1:10) {
+      
+        Index = Folds.Temp[i]
+        names(Index) = c("Index")
+        train = Data[-Index$Index, ]
+        test = Data[Index$Index, ]
+      
+        RF=randomForest.method.2(test = test, train = train)
+        
+        KNN = KNN(test = test, train = train, seq(from = 1, to = nrow(test), by = 2), ...)
+        
+        LDA = LDA_Heart(test, train, formula)
+        
+        Tree = Pruned.method(test = test, train = train)
+  
+        ENET = ENETfunc(test = test, train = train)
+        
+        LASSO = LASSOfunc(test = test, train = train)
+        
+        RIDGE = RIDGEfunc(test = test, train = train)
+        
+        Lasso_cv <- LASSOfunc_cv_l(train = train, test = test)
+      
+        ENET_cv <- ENETfunc_cv_l(train = train, test = test)
+        
+        RIDGE_cv <- RIDGEfunc_cv_l(train=train, test = test)
+        
+        GLM_Full = LogRigress_Full(test = test, train = train)
+        
+        LDA_full = LDA_Heart(test, train, formula2)
+        
+        GLM_Step = LogRigress_Step(test = test, train = train)
+        
+        Fold = rbind(Fold, cbind(z, i, RF, KNN,LDA, Tree, ENET, LASSO, RIDGE, Lasso_cv, RIDGE_cv, ENET_cv, GLM_Full, GLM_Step))
+      }
+    Fold
+    }
+return(x)
+}
+
+KFold_CV_Heart_2 <- function(Data, iter, ...){
+  # library(foreach)
+  # 
+  # Data = Heart
+  # iter = 5
+  # formula =formula("target ~ cp + ca + sex + slope + thal")
+  # 
+doParallel::registerDoParallel(parallel::detectCores()) #register number of cores available
+ 
+  
+  Fold = NULL
+  
+  #for(z in 1:iter){
+x = foreach (z = 1:iter, .combine = rbind) %dopar% {
+  
+    Folds.Temp <- caret::createFolds(Heart$target, 10)
+    
+      for (i in 1:10) {
+      
+        Index = Folds.Temp[i]
+        names(Index) = c("Index")
+        train = Data[-Index$Index, ]
+        test = Data[Index$Index, ]
+      
+        RF=randomForest.method.2(test = test, train = train)
+        
+        KNN = KNN(test = test, train = train, seq(from = 1, to = nrow(test), by = 2), ...)
+        
+        #LDA = LDA_Heart(test, train, formula)
+        
+        Tree = Pruned.method(test = test, train = train)
+  
+        ENET = ENETfunc(test = test, train = train)
+        
+        LASSO = LASSOfunc(test = test, train = train)
+        
+        RIDGE = RIDGEfunc(test = test, train = train)
+        
+        Lasso_cv <- LASSOfunc_cv_l(train = train, test = test)
+      
+        ENET_cv <- ENETfunc_cv_l(train = train, test = test)
+        
+        RIDGE_cv <- RIDGEfunc_cv_l(train=train, test = test)
+        
+        #LDA_full = LDA_Heart(test, train, formula2)
+          
+        GLM_Full = LogRigress_Full(test = test, train = train)
+        
+        GLM_Step = LogRigress_Step(test = test, train = train)
+        
+        Fold = rbind(Fold, cbind(z, i, RF, KNN, Tree, ENET, LASSO, RIDGE, Lasso_cv, RIDGE_cv, ENET_cv, GLM_Full, GLM_Step))
+      }
+    Fold
+    }
+return(x)
+}
+
+```
+
+
+```{r}
+tictoc::tic()
+Data = KFold_CV_Heart(Data = Heart, iter = 4, formula =formula("target ~ cp + ca + sex + slope + thal"))
+tictoc::toc()
+
+tictoc::tic()
+Data2 = KFold_CV_Heart_2(Data = Heart, iter = 200, formula = formula("target ~ cp + ca + sex + slope + thal"))
+tictoc::toc()
+
+```
+
+
+```{r}
+Data_Long = Data %>%
+  gather(key = Model, 
+         value = Accuracy,
+         RF_sqrt:GLM_Full)
+
+Data_Long2 = Data2 %>%
+  gather(key = Model, 
+         value = Accuracy,
+         RF_sqrt:GLM_step)
+
+Data = rbind(Data_Long2, Data_Long)
+
+Output_table <- Data_Long2 %>%
+  group_by(Model) %>%
+  summarise(Mean = mean(Accuracy),
+            SD = sd(Accuracy),
+            Median = median(Accuracy))
+
+kable(Output_table)
+
+ggplot(data = Data_Long2, aes(x = Model, y = Accuracy, fill = Model))+
+    geom_boxplot()+
+    theme_bw()+
+    theme(legend.position = "none")+
+    theme(axis.text.x = element_text(angle = 90, hjust =1))
+write.csv(Output_table, "UCI_200_table.csv")
+write.csv(Data2, "UCI_200it.csv")
+```

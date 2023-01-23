@@ -1,6 +1,7 @@
 # MachineLearning
 ## Tutorial Datasets analyzed by Machine Learning
-* Kaggles Titanic Dataset
+* Kaggles Titanic Dataset (Python)
+* Kaggles Heart Disease Dataset (R)
 ## Data Preprocessing and Random Forest Hyperparameter Tuning
 * See RandomForestTuningExample.ipynb
 * In this file, I do an iteration of randomsearch tuning to find a subset of hyperparameter values to tune more thoroughly in suubsequent gridsearch.

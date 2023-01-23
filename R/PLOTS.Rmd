@@ -1,0 +1,37 @@
+---
+title: "FINALKaggle"
+author: "Paul Phillips"
+date: "12/3/2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd('C:/Users/pauld/Desktop/StatisticalComputing/Project/FINAL/Final2')
+UCI200it= read.csv('UCI_200it.csv',header=TRUE, sep=',')
+
+REG=UCI200it[-c(5:16)]
+REG=REG[-c(8:12)]
+
+REG_Long = REG %>%
+  gather(key = Model, 
+         value = Accuracy,
+         RF_sqrt:GLM_step)
+
+m = lm(Accuracy ~ Model, data=REG_Long)
+LetterData = emmeans::emmeans(m, specs= ~Model) %>% multcomp::cld(Letters=letters, level=0.95) %>% mutate( y = 1.25 )
+LetterData
+
+png('ALL.png')
+test=ggplot(data = REG_Long, aes(x = Model, y = Accuracy, fill = Model))+
+    geom_boxplot()+
+    theme_bw()+
+    theme(legend.position = "none")+
+    theme(axis.text.x = element_text(angle = 90, hjust =1))+
+    geom_text( data=LetterData, aes(x=Model, y=y, label=.group), size=3 )
+dev.off()
+```
+
